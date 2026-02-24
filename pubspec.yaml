@@ -1,0 +1,360 @@
+import 'package:flutter/material.dart';
+import '../models/note.dart';
+import '../services/notes_service.dart';
+import 'note_editor_screen.dart';
+import 'login_screen.dart';
+
+class NotesListScreen extends StatefulWidget {
+  final String password;
+  const NotesListScreen({super.key, required this.password});
+
+  @override
+  State<NotesListScreen> createState() => _NotesListScreenState();
+}
+
+class _NotesListScreenState extends State<NotesListScreen> {
+  final NotesService _notesService = NotesService();
+  List<Note> _notes = [];
+  bool _isLoading = true;
+  late String _currentPassword;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentPassword = widget.password;
+    _loadNotes();
+  }
+
+  Future<void> _loadNotes() async {
+    try {
+      setState(() => _isLoading = true);
+      final notes = await _notesService.loadNotes(_currentPassword);
+      setState(() {
+        _notes = notes;
+        _isLoading = false;
+      });
+    } catch (e) {
+      // If loading fails (e.g., first time), just start with empty notes
+      setState(() {
+        _notes = [];
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _createNewNote() async {
+
+    final TextEditingController titleController = TextEditingController();
+    
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('New Note'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Enter a name for your new note:'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: titleController,
+              decoration: const InputDecoration(
+                labelText: 'Note Title',
+                border: OutlineInputBorder(),
+              ),
+              autofocus: true,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, null),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, titleController.text),
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
+
+    if (result != null && result.isNotEmpty) {
+      final newNote = Note(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        title: result,
+        content: '',
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      );
+
+      try {
+        await _notesService.addNote(newNote, _notes, _currentPassword);
+        setState(() {
+          _notes.add(newNote);
+        });
+        
+        // Open the note for editing
+        _openNote(newNote);
+      } catch (e) {
+        _showError('Failed to create note: $e');
+      }
+    }
+  }
+
+  void _openNote(Note note) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => NoteEditorScreen(
+          note: note,
+          password: _currentPassword,
+          onNoteUpdated: (updatedNote) {
+            setState(() {
+              final index = _notes.indexWhere((n) => n.id == note.id);
+              if (index != -1) {
+                _notes[index] = updatedNote;
+              }
+            });
+          },
+          onNoteDeleted: (deletedNoteId) {
+            setState(() {
+              _notes.removeWhere((n) => n.id == deletedNoteId);
+            });
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _deleteNote(Note note) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Note'),
+        content: Text('Are you sure you want to delete "${note.title}"?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == true) {
+      try {
+        await _notesService.deleteNote(note.id, _notes, _currentPassword);
+        setState(() {
+          _notes.removeWhere((n) => n.id == note.id);
+        });
+      } catch (e) {
+        _showError('Failed to delete note: $e');
+      }
+    }
+  }
+
+  void _logout() {
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (context) => const LoginScreen()),
+    );
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+      ),
+    );
+  }
+
+  String _formatDate(DateTime dateTime) {
+    return '${dateTime.day}/${dateTime.month}/${dateTime.year} ${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Nexii Notes'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.info_outline),
+            onPressed: () async {
+              final info = await _notesService.getNotesFileInfo();
+              showDialog(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text('Storage Info'),
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('File exists: ${info['exists']}'),
+                      if (info['exists']) ...[
+                        Text('Size: ${(info['size'] / 1024).toStringAsFixed(2)} KB'),
+                        Text('Last modified: ${_formatDate(info['lastModified'])}'),
+                      ],
+                      Text('Path: ${info['path']}'),
+                    ],
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('OK'),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: _logout,
+          ),
+        ],
+      ),
+      body: _isLoading
+        ? const Center(child: CircularProgressIndicator())
+        : _notes.isEmpty
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  // Welcome message
+                  Container(
+                    padding: const EdgeInsets.all(24),
+                    margin: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [Colors.deepPurple.shade100, Colors.deepPurple.shade50],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.grey.withOpacity(0.3),
+                          spreadRadius: 2,
+                          blurRadius: 8,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      children: [
+                        Text(
+                          'Hello Nexii! 👋',
+                          style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.deepPurple.shade800,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Welcome to your secure notes app',
+                          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                            color: Colors.deepPurple.shade600,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  Icon(
+                    Icons.note_add_outlined,
+                    size: 64,
+                    color: Colors.grey.shade400,
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'No notes yet',
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      color: Colors.grey.shade600,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Tap the + button to create your first secure note',
+                    style: TextStyle(color: Colors.grey.shade500),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            )
+          : ListView.builder(
+              padding: const EdgeInsets.all(8.0),
+              itemCount: _notes.length,
+              itemBuilder: (context, index) {
+                final note = _notes[index];
+                return Card(
+                  margin: const EdgeInsets.symmetric(vertical: 4.0),
+                  child: ListTile(
+                    leading: CircleAvatar(
+                      child: Text(
+                        note.title.isNotEmpty ? note.title[0].toUpperCase() : 'N',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    title: Text(
+                      note.title.isNotEmpty ? note.title : 'Untitled Note',
+                      style: const TextStyle(fontWeight: FontWeight.w500),
+                    ),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (note.content.isNotEmpty)
+                          Text(
+                            note.content.length > 50 
+                              ? '${note.content.substring(0, 50)}...'
+                              : note.content,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Modified: ${_formatDate(note.updatedAt)}',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Colors.grey.shade600,
+                          ),
+                        ),
+                      ],
+                    ),
+                    trailing: PopupMenuButton(
+                      itemBuilder: (context) => [
+                        const PopupMenuItem(
+                          value: 'delete',
+                          child: Row(
+                            children: [
+                              Icon(Icons.delete, color: Colors.red),
+                              SizedBox(width: 8),
+                              Text('Delete'),
+                            ],
+                          ),
+                        ),
+                      ],
+                      onSelected: (value) {
+                        if (value == 'delete') {
+                          _deleteNote(note);
+                        }
+                      },
+                    ),
+                    onTap: () => _openNote(note),
+                  ),
+                );
+              },
+            ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _createNewNote,
+        child: const Icon(Icons.add),
+      ),
+    );
+  }
+}

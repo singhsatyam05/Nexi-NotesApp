@@ -1,0 +1,333 @@
+import 'package:flutter/material.dart';
+import '../models/note.dart';
+import '../services/notes_service.dart';
+
+class NoteEditorScreen extends StatefulWidget {
+  final Note note;
+  final String password;
+  final Function(Note) onNoteUpdated;
+  final Function(String) onNoteDeleted;
+
+  const NoteEditorScreen({
+    super.key,
+    required this.note,
+    required this.password,
+    required this.onNoteUpdated,
+    required this.onNoteDeleted,
+  });
+
+  @override
+  State<NoteEditorScreen> createState() => _NoteEditorScreenState();
+}
+
+class _NoteEditorScreenState extends State<NoteEditorScreen> {
+  final TextEditingController _titleController = TextEditingController();
+  final TextEditingController _contentController = TextEditingController();
+  final NotesService _notesService = NotesService();
+  
+  bool _isModified = false;
+  bool _isSaving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _titleController.text = widget.note.title;
+    _contentController.text = widget.note.content;
+    
+    // Listen for changes
+    _titleController.addListener(_onTextChanged);
+    _contentController.addListener(_onTextChanged);
+  }
+
+  void _onTextChanged() {
+    if (!_isModified) {
+      setState(() {
+        _isModified = true;
+      });
+    }
+  }
+
+  Future<void> _saveNote() async {
+    if (!_isModified || _isSaving) return;
+    
+    setState(() {
+      _isSaving = true;
+    });
+
+    try {
+      final updatedNote = widget.note.copyWith(
+        title: _titleController.text.trim().isEmpty ? 'Untitled Note' : _titleController.text.trim(),
+        content: _contentController.text,
+        updatedAt: DateTime.now(),
+      );
+
+      // We need to pass current notes list, so we'll load it first
+      final currentNotes = await _notesService.loadNotes(widget.password);
+      await _notesService.updateNote(updatedNote, currentNotes, widget.password);
+      
+      widget.onNoteUpdated(updatedNote);
+      
+      setState(() {
+        _isModified = false;
+        _isSaving = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Note saved'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 1),
+        ),
+      );
+    } catch (e) {
+      setState(() {
+        _isSaving = false;
+      });
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to save: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _deleteNote() async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Note'),
+        content: Text('Are you sure you want to delete "${widget.note.title}"?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == true) {
+      try {
+        final currentNotes = await _notesService.loadNotes(widget.password);
+        await _notesService.deleteNote(widget.note.id, currentNotes, widget.password);
+        
+        widget.onNoteDeleted(widget.note.id);
+        
+        if (mounted) {
+          Navigator.pop(context);
+        }
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to delete: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<bool> _onWillPop() async {
+    if (_isModified) {
+      final result = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Unsaved Changes'),
+          content: const Text('You have unsaved changes. Do you want to save before leaving?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Discard'),
+            ),
+            TextButton(
+              onPressed: () async {
+                Navigator.pop(context, true);
+                await _saveNote();
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      );
+      
+      return result ?? false;
+    }
+    return true;
+  }
+
+  String _formatDate(DateTime dateTime) {
+    return '${dateTime.day}/${dateTime.month}/${dateTime.year} ${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return WillPopScope(
+      onWillPop: _onWillPop,
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(_titleController.text.isEmpty ? 'New Note' : _titleController.text),
+          actions: [
+            if (_isModified)
+              IconButton(
+                icon: _isSaving 
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.save),
+                onPressed: _isSaving ? null : _saveNote,
+                tooltip: 'Save Note',
+              ),
+            PopupMenuButton(
+              itemBuilder: (context) => [
+                const PopupMenuItem(
+                  value: 'info',
+                  child: Row(
+                    children: [
+                      Icon(Icons.info_outline),
+                      SizedBox(width: 8),
+                      Text('Note Info'),
+                    ],
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'delete',
+                  child: Row(
+                    children: [
+                      Icon(Icons.delete, color: Colors.red),
+                      SizedBox(width: 8),
+                      Text('Delete Note'),
+                    ],
+                  ),
+                ),
+              ],
+              onSelected: (value) {
+                if (value == 'delete') {
+                  _deleteNote();
+                } else if (value == 'info') {
+                  showDialog(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: const Text('Note Information'),
+                      content: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Created: ${_formatDate(widget.note.createdAt)}'),
+                          Text('Last Modified: ${_formatDate(widget.note.updatedAt)}'),
+                          Text('Characters: ${_contentController.text.length}'),
+                          Text('Words: ${_contentController.text.split(' ').where((word) => word.isNotEmpty).length}'),
+                          Text('ID: ${widget.note.id}'),
+                        ],
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text('OK'),
+                        ),
+                      ],
+                    ),
+                  );
+                }
+              },
+            ),
+          ],
+        ),
+        body: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            children: [
+              // Title field
+              TextField(
+                controller: _titleController,
+                decoration: InputDecoration(
+                  hintText: 'Note title...',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  prefixIcon: const Icon(Icons.title),
+                ),
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+                textCapitalization: TextCapitalization.words,
+              ),
+              
+              const SizedBox(height: 16),
+              
+              // Content field
+              Expanded(
+                child: TextField(
+                  controller: _contentController,
+                  decoration: InputDecoration(
+                    hintText: 'Start writing your secure note...',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    alignLabelWithHint: true,
+                  ),
+                  maxLines: null,
+                  expands: true,
+                  textAlignVertical: TextAlignVertical.top,
+                  style: Theme.of(context).textTheme.bodyLarge,
+                ),
+              ),
+              
+              // Status bar
+              if (_isModified)
+                Container(
+                  margin: const EdgeInsets.only(top: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.edit, size: 16, color: Colors.orange.shade700),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Unsaved changes',
+                        style: TextStyle(
+                          color: Colors.orange.shade700,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+        floatingActionButton: _isModified ? FloatingActionButton(
+          onPressed: _isSaving ? null : _saveNote,
+          child: _isSaving 
+            ? const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Icon(Icons.save),
+        ) : null,
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _contentController.dispose();
+    super.dispose();
+  }
+}

@@ -1,0 +1,263 @@
+# Nexii — Secure Notes App
+
+A **Flutter-based secure notes application** that stores your notes in an encrypted file, entirely on your device. No internet connection required, no cloud sync — your data stays local.
+
+---
+
+## Features
+
+| Feature | Description |
+|---|---|
+| 🔐 Password Login | App is locked with a master password on every launch |
+| 🔒 Encrypted Storage | Notes are XOR-encrypted and Base64-encoded before being written to disk |
+| 📝 Rich Note Editor | Full-screen editor with title + content fields and an unsaved-changes indicator |
+| 🗂️ Note Management | Create, open, edit, and delete notes from the notes list |
+| 💾 Manual Save | Save button appears only when there are unsaved changes |
+| ⚠️ Unsaved-Changes Guard | Prompts to save or discard when navigating away with unsaved changes |
+| 📊 Storage Info | View the encrypted file's path, size, and last-modified timestamp |
+| 📱 Cross-Platform | Targets Android, iOS, Windows, Linux, macOS, and Web via Flutter |
+| 🚫 Local Only | No network calls — all data stays on the device |
+
+---
+
+## Screenshots
+
+| Login Screen | Notes List | Note Editor |
+|---|---|---|
+| Gradient purple lock screen with master password input | Card-based list with note title, preview, and modification date | Full-screen editor with title field, content area, and save FAB |
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- **Flutter SDK** `3.8.1` or higher (`sdk: ^3.8.1`)
+- **Dart** (bundled with Flutter)
+- **Android Studio** (for Android builds) or **Xcode** (for iOS/macOS builds)
+- An Android device / emulator **or** a desktop target (Windows, Linux, macOS)
+
+### Installation
+
+1. **Clone the repository**
+   ```bash
+   git clone <your-repo-url>
+   cd nexii
+   ```
+
+2. **Install dependencies**
+   ```bash
+   flutter pub get
+   ```
+
+3. **Enable Developer Mode** *(Windows only — required for symlink support)*
+   ```bash
+   start ms-settings:developers
+   ```
+
+4. **Run the app**
+   ```bash
+   # Android emulator / device
+   flutter run
+
+   # Specific target
+   flutter run -d windows
+   flutter run -d chrome
+   ```
+
+---
+
+## Project Structure
+
+```
+nexii/
+├── lib/
+│   ├── main.dart                   # App entry point — MaterialApp with dark purple theme
+│   ├── models/
+│   │   └── note.dart               # Note data model (id, title, content, timestamps)
+│   ├── screens/
+│   │   ├── login_screen.dart       # Master password entry & validation
+│   │   ├── notes_list_screen.dart  # Notes overview — create, open, delete, logout
+│   │   └── note_editor_screen.dart # Full-screen note editor with save/delete
+│   └── services/
+│       └── notes_service.dart      # File I/O, XOR encryption, CRUD helpers
+├── android/                        # Android platform code
+├── ios/                            # iOS platform code
+├── windows/                        # Windows platform code
+├── linux/                          # Linux platform code
+├── macos/                          # macOS platform code
+├── web/                            # Web platform code
+├── test/
+│   └── widget_test.dart            # Basic widget test scaffold
+├── pubspec.yaml                    # Package manifest & dependencies
+└── analysis_options.yaml           # Dart linter configuration
+```
+
+---
+
+## Architecture
+
+The app follows a simple **3-layer architecture**:
+
+```
+Screens (UI)
+    │
+    ▼
+Services (Business Logic / File I/O)
+    │
+    ▼
+Models (Data)
+```
+
+- **`Note` model** — Immutable data class with `toJson`, `fromJson`, `copyWith`, `==`, and `hashCode`.
+- **`NotesService`** — Handles all file operations and encryption/decryption. No external state.
+- **Screens** — Stateful Flutter widgets that call `NotesService` directly and manage local UI state.
+
+---
+
+## Data Flow
+
+```
+User types note
+    │
+    ▼
+NoteEditorScreen._saveNote()
+    │
+    ▼
+NotesService.updateNote()
+    │── Loads full notes list from file
+    │── Updates the changed note in the list
+    │── Re-serialises list → JSON → XOR encrypt → Base64 → write to disk
+    ▼
+nexii_notes.json  (encrypted on device)
+```
+
+---
+
+## Security
+
+| Mechanism | Implementation |
+|---|---|
+| **Password validation** | Plain-string comparison against a hardcoded master password |
+| **Encryption** | XOR cipher using the password as a repeating key |
+| **Encoding** | Base64 wraps the raw XOR-encrypted bytes |
+| **Storage** | Encrypted JSON written to the app's documents directory via `path_provider` |
+| **Networking** | None — app has no network calls |
+
+> ⚠️ **Note:** The current XOR encryption is suitable for demonstration / educational purposes. For production use, replace with **AES-256** (e.g., via the `encrypt` package) and use a securely generated & stored key derivation function such as **PBKDF2** or **Argon2**.
+
+---
+
+## Storage
+
+Notes are stored in a single encrypted file:
+
+| Platform | Path |
+|---|---|
+| Android / iOS | `<app documents directory>/nexii_notes.json` |
+| Windows | `%APPDATA%\com.example.nexii\nexii_notes.json` |
+| Linux / macOS | `~/.local/share/nexii/nexii_notes.json` |
+
+**File format (before encryption):**
+```json
+{
+  "version": "1.0",
+  "timestamp": "2026-02-24T12:00:00.000Z",
+  "notes": [
+    {
+      "id": "1708772400000",
+      "title": "My Note",
+      "content": "Note body text...",
+      "createdAt": "2026-02-24T12:00:00.000Z",
+      "updatedAt": "2026-02-24T12:05:00.000Z"
+    }
+  ]
+}
+```
+
+---
+
+## Dependencies
+
+| Package | Version | Purpose |
+|---|---|---|
+| `flutter_secure_storage` | `^9.2.2` | Secure key/value storage (available for future use) |
+| `crypto` | `^3.0.3` | Cryptographic hashing utilities (available for future use) |
+| `path_provider` | `^2.1.1` | Platform-aware app documents directory path |
+| `shared_preferences` | `^2.2.2` | Lightweight persistent key-value store (available for future use) |
+| `cupertino_icons` | `^1.0.8` | iOS-style icon set |
+
+---
+
+## Usage
+
+1. **Launch** the app — you will see the login screen.
+2. **Enter the master password** and tap **"Unlock Nexii"**.
+3. **Notes List** — tap **＋** to create a new note (you'll be prompted for a title).
+4. **Edit** — tap any note card to open the full editor.
+5. **Save** — tap the save button (or the floating save button) when you're done.
+6. **Delete** — use the ⋮ menu on a note card or inside the editor.
+7. **Storage Info** — tap the ℹ icon in the app bar of the notes list.
+8. **Logout** — tap the logout icon to return to the login screen.
+
+---
+
+## Running Tests
+
+```bash
+flutter test
+```
+
+The `test/` directory contains the default widget-test scaffold. Add your own tests under that directory.
+
+---
+
+## Building for Release
+
+```bash
+# Android APK
+flutter build apk --release
+
+# Android App Bundle (Play Store)
+flutter build appbundle --release
+
+# Windows
+flutter build windows --release
+
+# iOS (requires macOS + Xcode)
+flutter build ios --release
+```
+
+---
+
+## Known Limitations
+
+- Hardcoded master password (no user-settable password flow yet)
+- XOR encryption — not suitable for sensitive production data
+- No search or filter functionality on the notes list
+- No note categories / tags
+- No export / backup feature
+- `flutter_secure_storage`, `crypto`, and `shared_preferences` are imported but reserved for future enhancements
+
+---
+
+## Roadmap
+
+- [ ] User-configurable master password with SHA-256 / PBKDF2 hashing
+- [ ] AES-256 encryption for stored notes
+- [ ] Search bar on the notes list
+- [ ] Note categories / colour labels
+- [ ] Biometric (fingerprint / Face ID) unlock
+- [ ] Export notes as plain-text or PDF
+
+---
+
+## Contributing
+
+This is a personal/educational project. Feel free to fork and modify for your own use. Pull requests with bug fixes or improvements are welcome.
+
+---
+
+## License
+
+This project is for **educational and personal use**.
